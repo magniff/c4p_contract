@@ -18,3 +18,6 @@ runs = 48
 depth = 40
 fail_on_revert = false
 show_metrics = true
+
+# FOUNDRY_PROFILE=deep forge test: long soak of the engine-equivalence fuzzers (see test/EngineEquivalence.t.sol)
+[profile.deep]

@@ -99,58 +99,116 @@ library ChessEngine {
     // Attack detection
     // ---------------------------------------------------------------------------------------
 
+    uint256 private constant NIBBLE_ONES = 0x1111111111111111111111111111111111111111111111111111111111111111;
+    uint256 private constant NIBBLE_HIGHS = 0x8888888888888888888888888888888888888888888888888888888888888888;
+
+    /// @dev Does `piece` occur anywhere on the board? Classic SWAR zero-lane test on `board ^ pattern`: the lowest
+    ///      zero nibble always sets its high bit and nibbles below it never do, so the result is exact.
+    function hasPiece(uint256 board, uint8 piece) internal pure returns (bool) {
+        unchecked {
+            uint256 x = board ^ (NIBBLE_ONES * piece);
+            return ((x - NIBBLE_ONES) & ~x & NIBBLE_HIGHS) != 0;
+        }
+    }
+
+    function _nib(uint256 board, uint256 sq) private pure returns (uint256) {
+        return (board >> (sq << 2)) & 0xF;
+    }
+
     /// @notice Is `sq` attacked by any piece of the given colour?
+    /// @dev Hot path (runs for every candidate move), hence unsigned square arithmetic with explicit edge checks.
+    ///      Behaviour is identical to the reference engine (test/EngineEquivalence.t.sol).
     function isAttacked(uint256 board, uint8 sq, bool byBlack) internal pure returns (bool) {
-        int256 r = int256(uint256(sq >> 3));
-        int256 f = int256(uint256(sq & 7));
-        uint8 col = byBlack ? 8 : 0;
-        return _pawnAttacks(board, r, f, byBlack, col) || _knightAttacks(board, r, f, col)
-            || _rayAttacks(board, r, f, col);
-    }
+        unchecked {
+            uint256 s = sq;
+            uint256 r = s >> 3;
+            uint256 f = s & 7;
+            uint256 col = byBlack ? 8 : 0;
 
-    // an attacking white pawn sits one rank below the target, a black pawn one rank above
-    function _pawnAttacks(uint256 board, int256 r, int256 f, bool byBlack, uint8 col) private pure returns (bool) {
-        int256 pr = byBlack ? r + 1 : r - 1;
-        if (pr < 0 || pr > 7) return false;
-        return (f > 0 && _at(board, pr, f - 1) == (PAWN | col)) || (f < 7 && _at(board, pr, f + 1) == (PAWN | col));
-    }
-
-    function _knightAttacks(uint256 board, int256 r, int256 f, uint8 col) private pure returns (bool) {
-        for (uint256 i; i < 8; ++i) {
-            int256 a = (i & 4) == 0 ? int256(1) : int256(2);
-            int256 nr = r + ((i & 1) == 0 ? a : -a);
-            int256 nf = f + ((i & 2) == 0 ? 3 - a : a - 3);
-            if (_on(nr, nf) && _at(board, nr, nf) == (KNIGHT | col)) return true;
-        }
-        return false;
-    }
-
-    /// @dev King (adjacent square) and sliding pieces (rays) in all 8 directions.
-    function _rayAttacks(uint256 board, int256 r, int256 f, uint8 col) private pure returns (bool) {
-        for (uint256 i; i < 9; ++i) {
-            if (i == 4) continue;
-            if (_ray(board, r, f, int256(i / 3) - 1, int256(i % 3) - 1, col)) return true;
-        }
-        return false;
-    }
-
-    function _ray(uint256 board, int256 r, int256 f, int256 dr, int256 df, uint8 col) private pure returns (bool) {
-        bool diag = dr != 0 && df != 0;
-        r += dr;
-        f += df;
-        bool adjacent = true;
-        while (_on(r, f)) {
-            uint8 p = _at(board, r, f);
-            if (p != 0) {
-                if ((p & 8) != col) return false;
-                uint8 t = p & 7;
-                return t == QUEEN || (diag ? t == BISHOP : t == ROOK) || (adjacent && t == KING);
+            // an attacking white pawn sits one rank below the target, a black pawn one rank above
+            uint256 pawn = PAWN | col;
+            if (byBlack) {
+                if (r < 7 && ((f > 0 && _nib(board, s + 7) == pawn) || (f < 7 && _nib(board, s + 9) == pawn))) {
+                    return true;
+                }
+            } else if (r > 0 && ((f > 0 && _nib(board, s - 9) == pawn) || (f < 7 && _nib(board, s - 7) == pawn))) {
+                return true;
             }
-            adjacent = false;
-            r += dr;
-            f += df;
+
+            uint256 knight = KNIGHT | col;
+            if (hasPiece(board, uint8(knight))) {
+                // (+2,+1) (+2,-1) (+1,+2) (+1,-2) (-1,+2) (-1,-2) (-2,+1) (-2,-1) as (rank, file) offsets
+                if (r < 6 && ((f < 7 && _nib(board, s + 17) == knight) || (f > 0 && _nib(board, s + 15) == knight))) {
+                    return true;
+                }
+                if (r < 7 && ((f < 6 && _nib(board, s + 10) == knight) || (f > 1 && _nib(board, s + 6) == knight))) {
+                    return true;
+                }
+                if (r > 0 && ((f < 6 && _nib(board, s - 6) == knight) || (f > 1 && _nib(board, s - 10) == knight))) {
+                    return true;
+                }
+                if (r > 1 && ((f < 7 && _nib(board, s - 15) == knight) || (f > 0 && _nib(board, s - 17) == knight))) {
+                    return true;
+                }
+            }
+
+            return _rayAttacks(board, s, col);
         }
-        return false;
+    }
+
+    /// @dev Kings (first square of each ray) and sliders. A ray is only walked past its first square when a
+    ///      slider that moves along it exists at all; otherwise only an adjacent king could attack along it.
+    function _rayAttacks(uint256 board, uint256 s, uint256 col) private pure returns (bool) {
+        bool queen = hasPiece(board, uint8(QUEEN | col));
+        return _orthogonal(board, s, col, (queen || hasPiece(board, uint8(ROOK | col))) ? 7 : 1)
+            || _diagonal(board, s, col, (queen || hasPiece(board, uint8(BISHOP | col))) ? 7 : 1);
+    }
+
+    function _orthogonal(uint256 board, uint256 s, uint256 col, uint256 cap) private pure returns (bool) {
+        unchecked {
+            uint256 r = s >> 3;
+            uint256 f = s & 7;
+            return _slide(board, s, 8, _min(7 - r, cap), true, ROOK, col)
+                || _slide(board, s, 8, _min(r, cap), false, ROOK, col)
+                || _slide(board, s, 1, _min(7 - f, cap), true, ROOK, col)
+                || _slide(board, s, 1, _min(f, cap), false, ROOK, col);
+        }
+    }
+
+    function _diagonal(uint256 board, uint256 s, uint256 col, uint256 cap) private pure returns (bool) {
+        unchecked {
+            uint256 r = s >> 3;
+            uint256 f = s & 7;
+            return _slide(board, s, 9, _min(_min(7 - r, 7 - f), cap), true, BISHOP, col) // up-right
+                || _slide(board, s, 7, _min(_min(7 - r, f), cap), true, BISHOP, col) // up-left
+                || _slide(board, s, 7, _min(_min(r, 7 - f), cap), false, BISHOP, col) // down-right
+                || _slide(board, s, 9, _min(_min(r, f), cap), false, BISHOP, col); // down-left
+        }
+    }
+
+    function _min(uint256 a, uint256 b) private pure returns (uint256) {
+        return a < b ? a : b;
+    }
+
+    /// @dev Walk `steps` squares from `s` by +/-`step`. The first piece met decides: an enemy queen, an enemy
+    ///      `slider` (rook orthogonally, bishop diagonally), or an enemy king on the very first square attacks `s`.
+    function _slide(uint256 board, uint256 s, uint256 step, uint256 steps, bool up, uint8 slider, uint256 col)
+        private
+        pure
+        returns (bool)
+    {
+        unchecked {
+            for (uint256 k = 1; k <= steps; ++k) {
+                s = up ? s + step : s - step;
+                uint256 q = _nib(board, s);
+                if (q != 0) {
+                    if ((q & 8) != col) return false;
+                    uint256 t = q & 7;
+                    return t == QUEEN || t == slider || (k == 1 && t == KING);
+                }
+            }
+            return false;
+        }
     }
 
     function inCheck(Position memory p) internal pure returns (bool) {
@@ -170,8 +228,11 @@ library ChessEngine {
         uint8 from = uint8(move & 63);
         uint8 to = uint8((move >> 6) & 63);
         uint8 promo = uint8(move >> 12);
-        if (!_legal(p, from, to, promo)) return (false, p);
-        return (true, _apply(p, from, to, promo));
+        // same check as _legal, but keeps the applied position instead of computing it twice
+        if (!_pseudoLegal(p, from, to, promo)) return (false, p);
+        np = _apply(p, from, to, promo);
+        if (isAttacked(np.board, p.whiteToMove ? np.whiteKing : np.blackKing, p.whiteToMove)) return (false, p);
+        ok = true;
     }
 
     function isLegal(Position memory p, uint16 move) internal pure returns (bool) {
@@ -371,17 +432,71 @@ library ChessEngine {
     }
 
     /// @notice True if the side to move has at least one legal move.
+    /// @dev Runs after every move, so instead of trying all 64 destinations per piece it only tries the squares
+    ///      the piece could geometrically reach. Every candidate still goes through `_legal` (the same check that
+    ///      validates submitted moves), so the candidate set only has to be a superset of the legal moves: it can
+    ///      never make an illegal move count, it could only miss one. test/EngineEquivalence.t.sol checks it
+    ///      against the exhaustive scan in `legalMoves` and against the frozen reference engine.
     function hasLegalMove(Position memory p) internal pure returns (bool) {
         bool white = p.whiteToMove;
         uint256 board = p.board;
         for (uint8 from; from < 64; ++from) {
             uint8 piece = pieceAt(board, from);
             if (piece == 0 || ((piece & 8) == 0) != white) continue;
-            for (uint8 to; to < 64; ++to) {
-                if (_legal(p, from, to, _probePromo(board, from, to, white))) return true;
+            if (_pieceHasLegalMove(p, from, piece & 7, white)) return true;
+        }
+        return false;
+    }
+
+    /// @dev Candidates mirror the geometry accepted by `_pseudoLegal` exactly: pawn one/two forward and one
+    ///      diagonal; the 8 knight jumps; king one step or two sideways (castling); sliders along their rays up
+    ///      to and including the first occupied square (squares behind it fail `_clear` anyway).
+    function _pieceHasLegalMove(Position memory p, uint8 from, uint8 t, bool white) private pure returns (bool) {
+        int256 r = int256(uint256(from >> 3));
+        int256 f = int256(uint256(from & 7));
+        if (t == PAWN) {
+            int256 dir = white ? int256(1) : int256(-1);
+            return _try(p, from, r + dir, f) || _try(p, from, r + dir, f - 1) || _try(p, from, r + dir, f + 1)
+                || _try(p, from, r + 2 * dir, f);
+        }
+        if (t == KNIGHT) {
+            for (uint256 i; i < 8; ++i) {
+                int256 a = (i & 4) == 0 ? int256(1) : int256(2);
+                if (_try(p, from, r + ((i & 1) == 0 ? a : -a), f + ((i & 2) == 0 ? 3 - a : a - 3))) return true;
+            }
+            return false;
+        }
+        if (t == KING) {
+            for (uint256 i; i < 9; ++i) {
+                if (i != 4 && _try(p, from, r + int256(i / 3) - 1, f + int256(i % 3) - 1)) return true;
+            }
+            return _try(p, from, r, f + 2) || _try(p, from, r, f - 2);
+        }
+        uint256 board = p.board;
+        for (uint256 i; i < 9; ++i) {
+            if (i == 4) continue;
+            int256 dr = int256(i / 3) - 1;
+            int256 df = int256(i % 3) - 1;
+            bool diag = dr != 0 && df != 0;
+            if (diag ? t == ROOK : t == BISHOP) continue;
+            int256 rr = r + dr;
+            int256 ff = f + df;
+            while (_on(rr, ff)) {
+                uint8 q = _at(board, rr, ff);
+                if (q != 0 && ((q & 8) == 0) == white) break; // own piece: blocked, and not a capture
+                if (_legal(p, from, uint8(uint256(rr * 8 + ff)), 0)) return true;
+                if (q != 0) break;
+                rr += dr;
+                ff += df;
             }
         }
         return false;
+    }
+
+    function _try(Position memory p, uint8 from, int256 r, int256 f) private pure returns (bool) {
+        if (!_on(r, f)) return false;
+        uint8 to = uint8(uint256(r * 8 + f));
+        return _legal(p, from, to, _probePromo(p.board, from, to, p.whiteToMove));
     }
 
     /// @notice All legal moves for the side to move (promotions expanded into 4 moves).

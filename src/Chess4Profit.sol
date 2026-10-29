@@ -70,20 +70,33 @@ contract Chess4Profit {
         ThreefoldRepetition
     }
 
+    /// @dev Laid out for the hot path: a move reads `st`, `board` and the mover's seat, and writes `st` and `board`.
     struct Game {
-        address payable creator;
-        address payable joiner;
-        uint128 stake; // per player
+        address payable white; // slot 0. While Open only the creator's seat (the colour they chose) is filled.
+        uint96 stake; // per player
+        address payable black; // slot 1
+        State st; // slot 2
+        uint256 board; // slot 3: ChessEngine.Position.board
+    }
+
+    /// @dev Exactly one storage slot (30 bytes): everything a move changes except the board.
+    struct State {
+        Status status;
+        Result result;
+        Reason reason;
         uint32 increment;
         uint32 whiteTime; // seconds on white's clock as of lastMoveAt
         uint32 blackTime;
         uint40 lastMoveAt; // creation time while Open
         uint16 plies;
-        Status status;
-        Result result;
-        Reason reason;
-        bool creatorIsWhite;
-        ChessEngine.Position pos;
+        // the rest of ChessEngine.Position
+        bool whiteToMove;
+        uint8 castling;
+        uint8 epSquare;
+        uint8 halfmoveClock;
+        uint8 whiteKing;
+        uint8 blackKing;
+        uint16 fullmove;
     }
 
     /// @dev Flat view of a game for clients.
@@ -127,7 +140,8 @@ contract Chess4Profit {
 
     mapping(address => Profile) internal profiles;
 
-    bool private _locked;
+    /// @dev EIP-1153 transient storage: the same lock as a storage flag, without a cold slot write per call.
+    bool private transient _locked;
 
     // ------------------------------------------------------------------ events
 
@@ -190,19 +204,20 @@ contract Chess4Profit {
         nonReentrant
         returns (uint256 gameId)
     {
-        if (msg.value < MIN_STAKE || msg.value > type(uint128).max) revert BadStake();
+        if (msg.value < MIN_STAKE || msg.value > type(uint96).max) revert BadStake();
         if (baseTime < MIN_BASE_TIME || baseTime > MAX_BASE_TIME || increment > MAX_INCREMENT) revert BadTimeout();
 
         gameId = nextGameId++;
         Game storage g = games[gameId];
-        g.creator = payable(msg.sender);
-        g.stake = uint128(msg.value);
-        g.whiteTime = baseTime;
-        g.blackTime = baseTime;
-        g.increment = increment;
-        g.creatorIsWhite = creatorPlaysWhite;
-        g.status = Status.Open;
-        g.lastMoveAt = uint40(block.timestamp);
+        if (creatorPlaysWhite) g.white = payable(msg.sender);
+        else g.black = payable(msg.sender);
+        g.stake = uint96(msg.value);
+        State storage st = g.st;
+        st.status = Status.Open;
+        st.increment = increment;
+        st.whiteTime = baseTime;
+        st.blackTime = baseTime;
+        st.lastMoveAt = uint40(block.timestamp);
 
         uint256[] storage bucket = openByTable[lobbyKey(msg.value, baseTime, increment)];
         bucket.push(gameId);
@@ -214,8 +229,8 @@ contract Chess4Profit {
     ///         the game has expired (this is how abandoned tables get cleaned up).
     function cancelGame(uint256 gameId) external nonReentrant {
         Game storage g = _game(gameId);
-        if (g.status != Status.Open) revert NotOpen();
-        if (msg.sender != g.creator && block.timestamp <= uint256(g.lastMoveAt) + OPEN_WINDOW) revert NotCreator();
+        if (g.st.status != Status.Open) revert NotOpen();
+        if (msg.sender != _creator(g) && block.timestamp <= uint256(g.st.lastMoveAt) + OPEN_WINDOW) revert NotCreator();
         _cancel(gameId, g);
     }
 
@@ -226,7 +241,7 @@ contract Chess4Profit {
         for (uint256 scanned; scanned < limit && i < bucket.length; ++scanned) {
             uint256 id = bucket[i];
             Game storage g = games[id];
-            if (block.timestamp > uint256(g.lastMoveAt) + OPEN_WINDOW) {
+            if (block.timestamp > uint256(g.st.lastMoveAt) + OPEN_WINDOW) {
                 _cancel(id, g); // swap-and-pop moved the last entry into slot i, so don't advance
                 ++swept;
             } else {
@@ -238,21 +253,23 @@ contract Chess4Profit {
     /// @notice Join an open game by sending exactly the creator's stake.
     function joinGame(uint256 gameId) external payable nonReentrant {
         Game storage g = _game(gameId);
-        if (g.status != Status.Open) revert NotOpen();
+        State memory st = g.st;
+        if (st.status != Status.Open) revert NotOpen();
         if (msg.value != g.stake) revert BadStake();
-        if (msg.sender == g.creator) revert SelfJoin();
-        if (block.timestamp > uint256(g.lastMoveAt) + OPEN_WINDOW) revert Expired();
+        if (msg.sender == _creator(g)) revert SelfJoin();
+        if (block.timestamp > uint256(st.lastMoveAt) + OPEN_WINDOW) revert Expired();
 
         _removeOpen(g, gameId);
-        g.joiner = payable(msg.sender);
-        g.status = Status.Active;
-        g.lastMoveAt = uint40(block.timestamp);
+        if (g.white == address(0)) g.white = payable(msg.sender);
+        else g.black = payable(msg.sender);
+        st.status = Status.Active;
+        st.lastMoveAt = uint40(block.timestamp);
 
         ChessEngine.Position memory p = ChessEngine.initialPosition();
-        g.pos = p;
+        _save(g, st, p);
         positionCount[gameId][p.positionKey()] = 1;
 
-        emit GameStarted(gameId, _white(g), _black(g));
+        emit GameStarted(gameId, g.white, g.black);
     }
 
     // ------------------------------------------------------------------ play
@@ -260,24 +277,24 @@ contract Chess4Profit {
     /// @notice Play a move as the side to move. Reverts unless the move is fully legal.
     function makeMove(uint256 gameId, uint16 move) external nonReentrant {
         Game storage g = _game(gameId);
-        if (g.status != Status.Active) revert NotActive();
-        bool white = g.pos.whiteToMove;
-        if (msg.sender != (white ? _white(g) : _black(g))) revert NotYourTurn();
-        uint256 left = white ? g.whiteTime : g.blackTime;
-        uint256 elapsed = block.timestamp - g.lastMoveAt;
+        State memory st = g.st;
+        if (st.status != Status.Active) revert NotActive();
+        bool white = st.whiteToMove;
+        if (msg.sender != (white ? g.white : g.black)) revert NotYourTurn();
+        uint256 left = white ? st.whiteTime : st.blackTime;
+        uint256 elapsed = block.timestamp - st.lastMoveAt;
         if (elapsed > left) revert TurnTimedOut();
 
-        ChessEngine.Position memory p = g.pos;
-        (bool ok, ChessEngine.Position memory np) = ChessEngine.applyMove(p, move);
+        (bool ok, ChessEngine.Position memory np) = ChessEngine.applyMove(_position(g, st), move);
         if (!ok) revert IllegalMove();
 
-        g.pos = np;
-        g.lastMoveAt = uint40(block.timestamp);
-        uint256 newLeft = left - elapsed + g.increment;
+        st.lastMoveAt = uint40(block.timestamp);
+        uint256 newLeft = left - elapsed + st.increment;
         if (newLeft > MAX_BASE_TIME) newLeft = MAX_BASE_TIME; // hard bound on how long any one move can take
-        if (white) g.whiteTime = uint32(newLeft);
-        else g.blackTime = uint32(newLeft);
-        uint16 ply = ++g.plies;
+        if (white) st.whiteTime = uint32(newLeft);
+        else st.blackTime = uint32(newLeft);
+        uint16 ply = ++st.plies;
+        _save(g, st, np);
         emit MoveMade(gameId, msg.sender, move, ply);
 
         ChessEngine.Outcome o = ChessEngine.outcome(np);
@@ -297,18 +314,19 @@ contract Chess4Profit {
     /// @notice Concede the game; the opponent takes the pot.
     function resign(uint256 gameId) external nonReentrant {
         Game storage g = _game(gameId);
-        if (g.status != Status.Active) revert NotActive();
-        if (msg.sender == _white(g)) _finish(gameId, g, Result.BlackWins, Reason.Resignation);
-        else if (msg.sender == _black(g)) _finish(gameId, g, Result.WhiteWins, Reason.Resignation);
+        if (g.st.status != Status.Active) revert NotActive();
+        if (msg.sender == g.white) _finish(gameId, g, Result.BlackWins, Reason.Resignation);
+        else if (msg.sender == g.black) _finish(gameId, g, Result.WhiteWins, Reason.Resignation);
         else revert NotPlayer();
     }
 
     /// @notice If the side to move let its clock run out, anyone can end the game in the opponent's favour.
     function claimTimeout(uint256 gameId) external nonReentrant {
         Game storage g = _game(gameId);
-        if (g.status != Status.Active) revert NotActive();
-        bool white = g.pos.whiteToMove;
-        if (block.timestamp <= uint256(g.lastMoveAt) + (white ? g.whiteTime : g.blackTime)) revert NotTimedOut();
+        State memory st = g.st;
+        if (st.status != Status.Active) revert NotActive();
+        bool white = st.whiteToMove;
+        if (block.timestamp <= uint256(st.lastMoveAt) + (white ? st.whiteTime : st.blackTime)) revert NotTimedOut();
         _finish(gameId, g, white ? Result.BlackWins : Result.WhiteWins, Reason.Timeout);
     }
 
@@ -364,28 +382,29 @@ contract Chess4Profit {
 
     function getGame(uint256 gameId) external view returns (GameView memory v) {
         Game storage g = _game(gameId);
+        State memory st = g.st;
         v.id = gameId;
-        v.status = g.status;
-        v.result = g.result;
-        v.reason = g.reason;
-        if (g.status == Status.Open || g.status == Status.Cancelled) {
-            v.white = g.creator; // colours not assigned yet; creator listed first
+        v.status = st.status;
+        v.result = st.result;
+        v.reason = st.reason;
+        if (st.status == Status.Open || st.status == Status.Cancelled) {
+            v.white = _creator(g); // colours not assigned yet; creator listed first
         } else {
-            v.white = _white(g);
-            v.black = _black(g);
+            v.white = g.white;
+            v.black = g.black;
         }
         v.stake = g.stake;
-        v.increment = g.increment;
-        v.whiteTime = g.whiteTime;
-        v.blackTime = g.blackTime;
-        v.lastMoveAt = g.lastMoveAt;
-        if (g.status == Status.Open) {
-            v.deadline = uint256(g.lastMoveAt) + OPEN_WINDOW;
-        } else if (g.status == Status.Active) {
-            v.deadline = uint256(g.lastMoveAt) + (g.pos.whiteToMove ? g.whiteTime : g.blackTime);
+        v.increment = st.increment;
+        v.whiteTime = st.whiteTime;
+        v.blackTime = st.blackTime;
+        v.lastMoveAt = st.lastMoveAt;
+        if (st.status == Status.Open) {
+            v.deadline = uint256(st.lastMoveAt) + OPEN_WINDOW;
+        } else if (st.status == Status.Active) {
+            v.deadline = uint256(st.lastMoveAt) + (st.whiteToMove ? st.whiteTime : st.blackTime);
         }
-        v.plies = g.plies;
-        v.whiteToMove = g.pos.whiteToMove;
+        v.plies = st.plies;
+        v.whiteToMove = st.whiteToMove;
     }
 
     /// @notice Key of a lobby table: games are only matched with identical stake AND clock.
@@ -401,7 +420,7 @@ contract Chess4Profit {
         uint256 found;
         for (uint256 i = n; i > 0 && found < maxResults && n - i < scanLimit; --i) {
             uint256 id = bucket[i - 1];
-            if (block.timestamp <= uint256(games[id].lastMoveAt) + OPEN_WINDOW) ids[found++] = id;
+            if (block.timestamp <= uint256(games[id].st.lastMoveAt) + OPEN_WINDOW) ids[found++] = id;
         }
         assembly {
             mstore(ids, found)
@@ -413,39 +432,71 @@ contract Chess4Profit {
     }
 
     function getPosition(uint256 gameId) external view returns (ChessEngine.Position memory) {
-        return _game(gameId).pos;
+        Game storage g = _game(gameId);
+        return _position(g, g.st);
     }
 
     /// @notice Every legal move for the side to move (promotions expanded). Heavy: call via eth_call only.
     function legalMoves(uint256 gameId) external view returns (uint16[] memory) {
         Game storage g = _game(gameId);
-        if (g.status != Status.Active) revert NotActive();
-        return ChessEngine.legalMoves(g.pos);
+        if (g.st.status != Status.Active) revert NotActive();
+        return ChessEngine.legalMoves(_position(g, g.st));
     }
 
     function isMoveLegal(uint256 gameId, uint16 move) external view returns (bool) {
         Game storage g = _game(gameId);
-        if (g.status != Status.Active) revert NotActive();
-        return ChessEngine.isLegal(g.pos, move);
+        if (g.st.status != Status.Active) revert NotActive();
+        return ChessEngine.isLegal(_position(g, g.st), move);
     }
 
     // ------------------------------------------------------------------ internals
 
     function _game(uint256 gameId) internal view returns (Game storage g) {
         g = games[gameId];
-        if (g.status == Status.None) revert UnknownGame();
+        if (g.st.status == Status.None) revert UnknownGame();
+    }
+
+    /// @dev The creator is whoever holds a seat before anyone joins (Open and Cancelled games have only one).
+    function _creator(Game storage g) internal view returns (address payable) {
+        address payable w = g.white;
+        return w != address(0) ? w : g.black;
+    }
+
+    /// @dev The engine's view of the game: the board slot plus the position fields of `st`.
+    function _position(Game storage g, State memory st) internal view returns (ChessEngine.Position memory p) {
+        p.board = g.board;
+        p.whiteToMove = st.whiteToMove;
+        p.castling = st.castling;
+        p.epSquare = st.epSquare;
+        p.halfmoveClock = st.halfmoveClock;
+        p.whiteKing = st.whiteKing;
+        p.blackKing = st.blackKing;
+        p.fullmove = st.fullmove;
+    }
+
+    /// @dev Write `st` with the position fields of `p`, and the board: two slots.
+    function _save(Game storage g, State memory st, ChessEngine.Position memory p) internal {
+        st.whiteToMove = p.whiteToMove;
+        st.castling = p.castling;
+        st.epSquare = p.epSquare;
+        st.halfmoveClock = p.halfmoveClock;
+        st.whiteKing = p.whiteKing;
+        st.blackKing = p.blackKing;
+        st.fullmove = p.fullmove;
+        g.st = st;
+        g.board = p.board;
     }
 
     function _cancel(uint256 gameId, Game storage g) internal {
-        g.status = Status.Cancelled;
+        g.st.status = Status.Cancelled;
         _removeOpen(g, gameId);
         emit GameCancelled(gameId);
-        _pay(g.creator, g.stake);
+        _pay(_creator(g), g.stake);
     }
 
     /// @dev Only valid while `g` is Open (whiteTime still equals the advertised baseTime).
     function _removeOpen(Game storage g, uint256 gameId) internal {
-        uint256[] storage bucket = openByTable[lobbyKey(g.stake, g.whiteTime, g.increment)];
+        uint256[] storage bucket = openByTable[lobbyKey(g.stake, g.st.whiteTime, g.st.increment)];
         uint256 idx = openPos[gameId] - 1;
         uint256 last = bucket[bucket.length - 1];
         bucket[idx] = last;
@@ -454,18 +505,11 @@ contract Chess4Profit {
         delete openPos[gameId];
     }
 
-    function _white(Game storage g) internal view returns (address payable) {
-        return g.creatorIsWhite ? g.creator : g.joiner;
-    }
-
-    function _black(Game storage g) internal view returns (address payable) {
-        return g.creatorIsWhite ? g.joiner : g.creator;
-    }
-
     function _finish(uint256 gameId, Game storage g, Result result, Reason reason) internal {
-        g.status = Status.Finished;
-        g.result = result;
-        g.reason = reason;
+        State storage st = g.st;
+        st.status = Status.Finished;
+        st.result = result;
+        st.reason = reason;
 
         uint256 pot = uint256(g.stake) * 2;
         uint256 fee = pot * FEE_BPS / 10_000;
@@ -477,10 +521,10 @@ contract Chess4Profit {
             payout = net / 2;
             fee += net - payout * 2; // odd wei goes to the fee
             emit GameFinished(gameId, result, reason, address(0), payout, fee);
-            _pay(_white(g), payout);
-            _pay(_black(g), payout);
+            _pay(g.white, payout);
+            _pay(g.black, payout);
         } else {
-            winner = result == Result.WhiteWins ? _white(g) : _black(g);
+            winner = result == Result.WhiteWins ? g.white : g.black;
             payout = net;
             emit GameFinished(gameId, result, reason, winner, payout, fee);
             _pay(payable(winner), payout);

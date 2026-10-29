@@ -122,8 +122,10 @@ Keys: `q` quit · `a` all games / mine · `f` hide finished · `v` flip board ·
 - **Moves** on the wire are `from | to << 6 | promotion << 12` with `a1 = 0 … h8 = 63`, the same numbering as
   python-chess. Events: `GameCreated`, `GameStarted`, `MoveMade`, `GameFinished`, `GameCancelled`.
 
-Gas: roughly 200k per ordinary move and 1.8M for the move that ends a game (it has to prove there is no legal
-reply). Comfortable on an L2; expensive on L1 at busy times.
+Gas (transaction receipts, `test/GasBench.t.sol` games replayed on anvil): about **97k per move** including the
+21k base cost, under 450k for the most expensive single move seen, and **~12M for a whole game** of 100-160 plies.
+The engine's worst case for any position, 16 queens included, is under 200k. Comfortable on an L2; expensive on
+L1 at busy times.
 
 ## Configuration
 
@@ -142,7 +144,7 @@ reply). Comfortable on an L2; expensive on L1 at busy times.
 src/ChessEngine.sol       rules: move validation, mate / stalemate / draw detection
 src/Chess4Profit.sol      lobby, clocks, settlement, fee
 sdk/chess4profit/         Python SDK, `c4p` CLI, dashboard (monitor.py, tui.py)
-scripts/                  devchain.py · demo.py · tui_demo.py · run_bot.py · fuzz_vs_pythonchess.py · export_abi.py
+scripts/                  devchain.py · demo.py · tui_demo.py · run_bot.py · fuzz_vs_pythonchess.py · mutate_engine.py · export_abi.py
 test/                     Foundry suites (see below)
 sdk/tests/                SDK suite, runs against a real local chain
 ```
@@ -160,6 +162,10 @@ forge test                                    # ~5 min: perft, rules, game flow,
 
 - **Rules**: move generation matches the reference perft counts on six standard positions; every position
   of thousands of random games is cross-checked against python-chess through the real contract.
+- **Optimisations**: the gas-optimised engine is checked against a frozen copy of the straightforward one
+  (`test/reference/`) on every move encoding, attack map and outcome (`EngineEquivalence.t.sol`), and the
+  packed storage layout is pinned slot by slot (`Storage.t.sol`). `scripts/mutate_engine.py` proves the suite
+  catches every class of move the mate/stalemate search could miss.
 - **Adversaries**: `Attacks.t.sol` (slow-play, lobby flooding, orphans, hostile and reentrant receivers,
   forced ETH), `Ordering.t.sol` (every racing pair of transactions in both orders), `GasWorstCase.t.sol`,
   `Profiles.t.sol` (name/description rules, injection and spoofing attempts), and `Invariants.t.sol` (stateful
