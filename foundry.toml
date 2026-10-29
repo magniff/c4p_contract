@@ -1,0 +1,20 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.28"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+# perft tests burn a lot of gas; the engine is pure compute
+gas_limit = 9223372036854775807
+memory_limit = 1073741824
+
+[fuzz]
+runs = 256
+
+[invariant]
+runs = 48
+depth = 40
+fail_on_revert = false
+show_metrics = true

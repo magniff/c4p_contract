@@ -1,0 +1,776 @@
+[
+ {
+  "type": "function",
+  "name": "FEE_BPS",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "FEE_RECIPIENT",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address payable"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "MAX_BASE_TIME",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "MAX_INCREMENT",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "MIN_BASE_TIME",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "MIN_STAKE",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "OPEN_WINDOW",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "cancelGame",
+  "inputs": [
+   {
+    "name": "gameId",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "claimTimeout",
+  "inputs": [
+   {
+    "name": "gameId",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "createGame",
+  "inputs": [
+   {
+    "name": "baseTime",
+    "type": "uint32",
+    "internalType": "uint32"
+   },
+   {
+    "name": "increment",
+    "type": "uint32",
+    "internalType": "uint32"
+   },
+   {
+    "name": "creatorPlaysWhite",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "gameId",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "payable"
+ },
+ {
+  "type": "function",
+  "name": "getGame",
+  "inputs": [
+   {
+    "name": "gameId",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "v",
+    "type": "tuple",
+    "internalType": "struct Chess4Profit.GameView",
+    "components": [
+     {
+      "name": "id",
+      "type": "uint256",
+      "internalType": "uint256"
+     },
+     {
+      "name": "status",
+      "type": "uint8",
+      "internalType": "enum Chess4Profit.Status"
+     },
+     {
+      "name": "result",
+      "type": "uint8",
+      "internalType": "enum Chess4Profit.Result"
+     },
+     {
+      "name": "reason",
+      "type": "uint8",
+      "internalType": "enum Chess4Profit.Reason"
+     },
+     {
+      "name": "white",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "black",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "stake",
+      "type": "uint256",
+      "internalType": "uint256"
+     },
+     {
+      "name": "increment",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "whiteTime",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "blackTime",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "lastMoveAt",
+      "type": "uint40",
+      "internalType": "uint40"
+     },
+     {
+      "name": "deadline",
+      "type": "uint256",
+      "internalType": "uint256"
+     },
+     {
+      "name": "plies",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "whiteToMove",
+      "type": "bool",
+      "internalType": "bool"
+     }
+    ]
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "getPosition",
+  "inputs": [
+   {
+    "name": "gameId",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "tuple",
+    "internalType": "struct ChessEngine.Position",
+    "components": [
+     {
+      "name": "board",
+      "type": "uint256",
+      "internalType": "uint256"
+     },
+     {
+      "name": "whiteToMove",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "castling",
+      "type": "uint8",
+      "internalType": "uint8"
+     },
+     {
+      "name": "epSquare",
+      "type": "uint8",
+      "internalType": "uint8"
+     },
+     {
+      "name": "halfmoveClock",
+      "type": "uint8",
+      "internalType": "uint8"
+     },
+     {
+      "name": "whiteKing",
+      "type": "uint8",
+      "internalType": "uint8"
+     },
+     {
+      "name": "blackKing",
+      "type": "uint8",
+      "internalType": "uint8"
+     },
+     {
+      "name": "fullmove",
+      "type": "uint16",
+      "internalType": "uint16"
+     }
+    ]
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "isMoveLegal",
+  "inputs": [
+   {
+    "name": "gameId",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "move",
+    "type": "uint16",
+    "internalType": "uint16"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bool",
+    "internalType": "bool"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "joinGame",
+  "inputs": [
+   {
+    "name": "gameId",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "payable"
+ },
+ {
+  "type": "function",
+  "name": "legalMoves",
+  "inputs": [
+   {
+    "name": "gameId",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint16[]",
+    "internalType": "uint16[]"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "lobbyKey",
+  "inputs": [
+   {
+    "name": "stake",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "baseTime",
+    "type": "uint32",
+    "internalType": "uint32"
+   },
+   {
+    "name": "increment",
+    "type": "uint32",
+    "internalType": "uint32"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "stateMutability": "pure"
+ },
+ {
+  "type": "function",
+  "name": "makeMove",
+  "inputs": [
+   {
+    "name": "gameId",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "move",
+    "type": "uint16",
+    "internalType": "uint16"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "nextGameId",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "openGameCount",
+  "inputs": [
+   {
+    "name": "table",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "openGames",
+  "inputs": [
+   {
+    "name": "table",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "maxResults",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "scanLimit",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "ids",
+    "type": "uint256[]",
+    "internalType": "uint256[]"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "pending",
+  "inputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "resign",
+  "inputs": [
+   {
+    "name": "gameId",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "sweepExpired",
+  "inputs": [
+   {
+    "name": "table",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "limit",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "swept",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "withdraw",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "event",
+  "name": "GameCancelled",
+  "inputs": [
+   {
+    "name": "gameId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "GameCreated",
+  "inputs": [
+   {
+    "name": "gameId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "creator",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "stake",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "baseTime",
+    "type": "uint32",
+    "indexed": false,
+    "internalType": "uint32"
+   },
+   {
+    "name": "increment",
+    "type": "uint32",
+    "indexed": false,
+    "internalType": "uint32"
+   },
+   {
+    "name": "creatorPlaysWhite",
+    "type": "bool",
+    "indexed": false,
+    "internalType": "bool"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "GameFinished",
+  "inputs": [
+   {
+    "name": "gameId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "result",
+    "type": "uint8",
+    "indexed": false,
+    "internalType": "enum Chess4Profit.Result"
+   },
+   {
+    "name": "reason",
+    "type": "uint8",
+    "indexed": false,
+    "internalType": "enum Chess4Profit.Reason"
+   },
+   {
+    "name": "winner",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "payout",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "fee",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "GameStarted",
+  "inputs": [
+   {
+    "name": "gameId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "white",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "black",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "MoveMade",
+  "inputs": [
+   {
+    "name": "gameId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "player",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "move",
+    "type": "uint16",
+    "indexed": false,
+    "internalType": "uint16"
+   },
+   {
+    "name": "ply",
+    "type": "uint16",
+    "indexed": false,
+    "internalType": "uint16"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Withdrawn",
+  "inputs": [
+   {
+    "name": "account",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "amount",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "error",
+  "name": "BadStake",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadTimeout",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "Expired",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "IllegalMove",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotActive",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotCreator",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotOpen",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotPlayer",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotTimedOut",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotYourTurn",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NothingToWithdraw",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "Reentrancy",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "SelfJoin",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "TurnTimedOut",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "UnknownGame",
+  "inputs": []
+ }
+]
