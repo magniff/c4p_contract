@@ -166,6 +166,8 @@ forge test                                    # ~5 min: perft, rules, game flow,
   (`test/reference/`) on every move encoding, attack map and outcome (`EngineEquivalence.t.sol`), and the
   packed storage layout is pinned slot by slot (`Storage.t.sol`). `scripts/mutate_engine.py` proves the suite
   catches every class of move the mate/stalemate search could miss.
+- **Proofs** (Halmos, `test/proofs/`, `scripts/prove.sh`): payouts, draw splits, refunds, the clock and turn
+  order are proved for every stake, timing and seat, not sampled. See SECURITY.md for what is and isn't proved.
 - **Adversaries**: `Attacks.t.sol` (slow-play, lobby flooding, orphans, hostile and reentrant receivers,
   forced ETH), `Ordering.t.sol` (every racing pair of transactions in both orders), `GasWorstCase.t.sol`,
   `Profiles.t.sol` (name/description rules, injection and spoofing attempts), and `Invariants.t.sol` (stateful

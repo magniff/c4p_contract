@@ -13,3 +13,4 @@ wallet.json
 
 # testnet deployment details (keys, addresses) live here and never leave this machine
 arbitrum/
+.venv-halmos/

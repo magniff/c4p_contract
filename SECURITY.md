@@ -162,6 +162,33 @@ contract**, but a hole in the safety net the engine argument relies on:
 | R3 | The transient lock needs Cancun (TSTORE/TLOAD). Forge simulates with its own EVM, so a deploy to a pre-Cancun chain would "succeed" and then revert on every call (no funds at risk: `createGame` itself reverts) | release checklist step 5 |
 | R4 | Internal helpers are only defined on their domain: `isAttacked` for squares < 64, `hasPiece` for pieces < 16, `fullmove` < 65535 (checked, reverts; ~12k plies is the longest possible game). The contract never passes anything else: squares come from `& 63`, kings from validated moves | documented here; no code change |
 
+### Formal verification (pass 7, Halmos symbolic execution)
+Proofs, not samples: each property below holds for **every** value of its symbolic inputs, executed on the
+compiled bytecode. Run with `scripts/prove.sh` (~20 s); `scripts/prove_reachability.py` guards against vacuous
+proofs (Halmos silently drops paths that revert for reasons other than an assertion, so it injects
+`assert(false)` into every proof and every branch and requires a counterexample each time).
+
+| Proof | Symbolic inputs | Property |
+|---|---|---|
+| `check_hasPieceIsExact` | all 2^256 boards, all 16 piece values | the SWAR presence test equals a plain scan |
+| `check_resignationPaysExactly` | every stake ≥ MIN_STAKE (all of uint96), both seats, either player resigning | winner gets pot − fee, fee recipient the fee, loser 0, contract keeps 0, result names the right colour |
+| `check_drawSplitsExactly` | every stake, both seats (via a real 19-ply stalemate) | equal halves; fee plus the odd wei to the fee recipient; sum = pot; contract keeps 0 |
+| `check_flagFallTimingIsExact` | every base time, increment, delay, seat | a flag can be claimed iff the time is exceeded, never a second earlier |
+| `check_flagFallPaysExactly` | every stake, both seats | the flagged player's opponent is paid exactly; the caller gets nothing |
+| `check_moveClockIsExact` | every base, increment, and both players' delays | a move is accepted iff in time; the clock charges exactly the elapsed time, adds the increment, caps at one day, leaves the other clock alone; deadline consistent |
+| `check_lateMoveIsRefused` | every base and every late delay | a late move always reverts `TurnTimedOut` |
+| `check_onlySideToMoveCanMove` | every caller address, both seats | nobody but the side to move can move |
+| `check_openGameRefundsExactly` | every stake, seat, delay, creator or stranger | an unjoined stake always returns exactly to its creator; strangers only after the window, and the refund still goes to the creator |
+| `check_joinWindowIsExact` | every stake and delay | joinable iff within the open window |
+
+**Not proved, and why.** `isAttacked` (and so `applyMove`, which uses it) could not be proved equivalent to the
+reference: Halmos explores paths one by one, every ray step branches in both implementations, and the rays
+compose sequentially, so a central square has on the order of 20^8 paths (a corner, with 3 rays, already takes
+21k paths and 7 minutes). Case splitting only partitions the same work. These stay covered by the exhaustive
+differential tests and mutation testing above; a path-merging prover (Certora) is the tool to try next. Also
+open: contract-wide invariants over arbitrary call sequences (money conservation, lobby exactness); the Foundry
+invariant suite checks them by random sequences, a prover would check all of them.
+
 ## Static analysis (Slither 0.11, 74 detectors)
 No reentrancy, unchecked-call, arbitrary-send, delegatecall, tx.origin, selfdestruct or access-control findings.
 Reported: `timestamp` comparisons (every one is the chess clock or the lobby expiry; deliberate and bounded),
@@ -189,7 +216,7 @@ is stranded), and uninitialized mapping/local false positives.
 - **Collusion / wash games** only burn the fee. There is nothing to farm.
 - **Deep reorgs**: a finished game's payout can be reorged like any transfer; wait for finality before relying on it.
 - **Fee recipient must be an EOA** (or a contract that can call `withdraw()`); a reverting recipient just accrues `pending`.
-- **Unchecked**: formal verification, third-party audit, economic simulation at scale, mainnet MEV behaviour.
+- **Unchecked**: formal verification of the chess engine and of contract-wide invariants (money and clock arithmetic are proved, see pass 7), third-party audit, economic simulation at scale, mainnet MEV behaviour.
 
 ## Best-practice checklist (mapped)
 From the general guidance reviewed (Checks-Effects-Interactions, reentrancy guards, pull payments, bounded
