@@ -41,12 +41,14 @@ def main() -> None:
             w = Wallet.create()
             Client.connect("local", wallet=w).dev_fund(50)
             wallets[name] = w
-        monitor = Monitor(watcher, {w.address: n for n, w in wallets.items()}, from_block=0)
+        # no local labels: the dashboard shows each bot's on-chain profile, which the bots publish themselves
+        monitor = Monitor(watcher, {w.address: None for w in wallets.values()}, from_block=0)
         for name, stake, skill in BOTS:
             env = dict(os.environ, C4P_PRIVATE_KEY=wallets[name].account.key.hex(), PYTHONWARNINGS="ignore")
             procs.append(subprocess.Popen(
                 [sys.executable, str(HERE / "run_bot.py"), "--stake", stake, "--skill", str(skill),
-                 "--delay", str(a.delay), "--movetime", str(a.movetime)],
+                 "--delay", str(a.delay), "--movetime", str(a.movetime),
+                 "--name", name, "--description", f"Stockfish 19 at skill {skill}, sits at the {stake} ETH table"],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
         Dashboard(monitor).run()
     finally:

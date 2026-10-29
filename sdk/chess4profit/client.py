@@ -6,6 +6,7 @@ import random
 import re
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -83,6 +84,27 @@ def to_wei(eth: Amount) -> int:
     return int(Decimal(str(eth)) * 10**18)
 
 
+def safe_text(s: str, limit: int = 280) -> str:
+    """Make on-chain text safe to display. The contract already rejects ASCII control bytes, but valid UTF-8
+    can still carry right-to-left overrides, zero-width characters and other invisible format characters
+    that let one string masquerade as another. Strip them, collapse whitespace, truncate."""
+    out = "".join(ch for ch in s if unicodedata.category(ch) not in ("Cc", "Cf", "Co", "Cs", "Cn"))
+    return " ".join(out.split())[:limit]
+
+
+@dataclass(frozen=True)
+class Profile:
+    address: str
+    name: str  # sanitized; "" when unset
+    description: str  # sanitized; "" when unset
+
+    @property
+    def label(self) -> str:
+        """Name plus an address fragment. Names are not unique, so never show a name without this."""
+        short = self.address[2:6].lower()
+        return f"{self.name}·{short}" if self.name else f"{self.address[:6]}…{self.address[-4:]}"
+
+
 class EventStream:
     """Ordered contract events. `poll()` is non-blocking; iterating blocks and yields forever (or until stop())."""
 
@@ -136,6 +158,7 @@ class Client:
         self.local = local
         self.max_fee_gwei = max_fee_gwei  # never sign a tx whose max fee per gas exceeds this (None = no cap)
         self._tx_lock = threading.Lock()  # serialises nonce allocation when one Client is shared across threads
+        self.deploy_block = 0  # floor for every log scan; set from the network config on connect
         abi = load_abi()
         self.contract = w3.eth.contract(address=Web3.to_checksum_address(contract_address), abi=abi)
         self._errors = {
@@ -163,7 +186,9 @@ class Client:
                 f"the code at {n.contract} is NOT the official Chess4Profit build - refusing to connect "
                 "(a wrong/poisoned address would send your stake to someone else's contract)"
             )
-        return cls(w3, n.contract, wallet, n.local)
+        c = cls(w3, n.contract, wallet, n.local)
+        c.deploy_block = n.deploy_block
+        return c
 
     # ------------------------------------------------------------------ account
 
@@ -276,6 +301,19 @@ class Client:
     def game(self, game_id: int) -> "Game":
         from .game import Game
         return Game(self, game_id)
+
+    # ------------------------------------------------------------------ profiles
+
+    def set_profile(self, name: str, description: str = ""):
+        """Publish this wallet's public name (<=32 chars of A-Z a-z 0-9 space - _ .) and description
+        (<=280 bytes of UTF-8, no control characters). Both empty removes the profile."""
+        return self.transact(self.contract.functions.setProfile(name, description))
+
+    def profile(self, address: Optional[str] = None) -> Profile:
+        """A bot's public profile, sanitized for display. Defaults to this wallet."""
+        addr = Web3.to_checksum_address(address or self.address)
+        name, desc = self.contract.functions.profileOf(addr).call()
+        return Profile(addr, safe_text(name, 32), safe_text(desc, 280))
 
     def game_info(self, game_id: int) -> GameInfo:
         r = self.contract.functions.getGame(game_id).call()

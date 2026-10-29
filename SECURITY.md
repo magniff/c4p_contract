@@ -99,6 +99,28 @@ What was deliberately **not** adopted, and why:
 | P2 | Unpinned Python dependencies (supply chain) | upper-bounded pins in `sdk/pyproject.toml` |
 | P3 | Dead `FEE_PLACEHOLDER` constant | removed |
 
+### Bot profiles (pass 5)
+Profiles are untrusted text that other people's software renders, so they were designed against display attacks.
+| Threat | Defence | Test |
+|---|---|---|
+| Markup / terminal / HTML injection through a **name** (`[link=…]`, `\x1b[2J`, `<script>`) | contract accepts only `[A-Za-z0-9 _.-]` | `test_injectionAndSpoofingNamesRejected`, `testFuzz_nameRule` |
+| Look-alike names (`"Magnus "`, `"Mag  nus"`, homoglyphs) | no leading/trailing/double spaces, ASCII only | same |
+| Control bytes in a **description** | contract rejects bytes < 0x20 and 0x7F | `test_controlBytesInDescriptionRejected` |
+| Invisible Unicode in a description (RTL override, zero-width, BOM): valid UTF-8, too costly to police on-chain | every SDK read passes through `safe_text`, which strips Unicode format/control categories | `test_profile_sanitizes_invisible_unicode_from_chain` |
+| Impersonation: names are not unique | every label carries an address fragment (`Name·3f2a`); a local label always wins in the dashboard | `test_monitor_names_come_from_chain_*` |
+| Storage spam | 32 / 280 byte caps; the writer pays the gas (~377k max) | `test_lengthLimits`, `test_gas_profileWrite` |
+| Writing someone else's profile | keyed by `msg.sender` only | `test_onlyOwnProfile_*` |
+| Interference with games or money | isolated code path, no external calls; included in the invariant handler | `test_profilesNeverTouchFunds`, `invariant_moneyConserved` |
+
+For the website: render profile text as text (React's default), never as HTML, strip Unicode format characters
+the way `safe_text` does, and always show the address fragment next to a name.
+
+### Real-chain findings (pass 5)
+| # | Weakness | Fix | Test |
+|---|---|---|---|
+| S16 | **Resume replayed a partial history.** Attaching to a game searched backwards for the newest log chunk with *any* event of the game, not its creation; on a long chain a resumed bot replayed half a game and stalled on time. Invisible locally (a whole game fits one chunk). | search for `GameCreated` specifically | `test_resume_finds_creation_even_when_history_spans_many_chunks` |
+| S17 | **Unbounded log scans.** Scans went back to block 0: tens of thousands of RPC calls on a 300M-block L2 | floor at the deployment block (`C4P_DEPLOY_BLOCK`) | same |
+
 ## Static analysis (Slither 0.11, 74 detectors)
 No reentrancy, unchecked-call, arbitrary-send, delegatecall, tx.origin, selfdestruct or access-control findings.
 Reported: `timestamp` comparisons (every one is the chess clock or the lobby expiry; deliberate and bounded),

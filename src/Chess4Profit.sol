@@ -37,6 +37,10 @@ contract Chess4Profit {
     uint256 public constant OPEN_WINDOW = 1 hours;
     /// @dev Gas forwarded when pushing a payout; if the push fails the amount is credited for `withdraw`.
     uint256 internal constant PAYOUT_GAS = 50_000;
+    /// @notice Bot profile limits. Names: [A-Za-z0-9 _.-], no leading/trailing/double spaces.
+    ///         Descriptions: any UTF-8 without control bytes. Names are NOT unique: show the address with them.
+    uint256 public constant MAX_NAME_BYTES = 32;
+    uint256 public constant MAX_DESCRIPTION_BYTES = 280;
 
     // ------------------------------------------------------------------ types
 
@@ -116,6 +120,13 @@ contract Chess4Profit {
     /// @notice Payouts whose push failed; claim with `withdraw`.
     mapping(address => uint256) public pending;
 
+    struct Profile {
+        string name;
+        string description;
+    }
+
+    mapping(address => Profile) internal profiles;
+
     bool private _locked;
 
     // ------------------------------------------------------------------ events
@@ -137,6 +148,7 @@ contract Chess4Profit {
         uint256 indexed gameId, Result result, Reason reason, address indexed winner, uint256 payout, uint256 fee
     );
     event Withdrawn(address indexed account, uint256 amount);
+    event ProfileUpdated(address indexed bot, string name, string description);
 
     // ------------------------------------------------------------------ errors
 
@@ -155,6 +167,8 @@ contract Chess4Profit {
     error IllegalMove();
     error NothingToWithdraw();
     error Reentrancy();
+    error BadName();
+    error BadDescription();
 
     modifier nonReentrant() {
         if (_locked) revert Reentrancy();
@@ -306,6 +320,44 @@ contract Chess4Profit {
         emit Withdrawn(msg.sender, amount);
         (bool sent,) = msg.sender.call{value: amount}("");
         require(sent, "withdraw failed");
+    }
+
+    // ------------------------------------------------------------------ profiles
+
+    /// @notice Set the caller's public name and description (both empty = remove the profile).
+    ///         Profiles never touch money or games; they exist so humans can tell bots apart.
+    function setProfile(string calldata name, string calldata description) external {
+        bytes calldata n = bytes(name);
+        bytes calldata d = bytes(description);
+        if (n.length > MAX_NAME_BYTES) revert BadName();
+        for (uint256 i; i < n.length; ++i) {
+            bytes1 c = n[i];
+            bool ok = (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c == "-"
+                || c == "_" || c == ".";
+            if (c == " ") {
+                // no leading, trailing or double spaces: "Magnus " can't impersonate "Magnus"
+                ok = i != 0 && i != n.length - 1 && n[i - 1] != " ";
+            }
+            if (!ok) revert BadName();
+        }
+        if (d.length > MAX_DESCRIPTION_BYTES) revert BadDescription();
+        for (uint256 i; i < d.length; ++i) {
+            // control bytes would let a description rewrite terminals / break one-line layouts
+            if (uint8(d[i]) < 0x20 || uint8(d[i]) == 0x7f) revert BadDescription();
+        }
+        if (n.length == 0 && d.length == 0) {
+            delete profiles[msg.sender];
+        } else {
+            Profile storage p = profiles[msg.sender];
+            p.name = name;
+            p.description = description;
+        }
+        emit ProfileUpdated(msg.sender, name, description);
+    }
+
+    function profileOf(address bot) external view returns (string memory name, string memory description) {
+        Profile storage p = profiles[bot];
+        return (p.name, p.description);
     }
 
     // ------------------------------------------------------------------ views

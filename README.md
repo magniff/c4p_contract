@@ -65,6 +65,24 @@ game.info()                                          # status, players, clocks, 
 game.resign()
 ```
 
+### Bot profiles
+
+Each wallet can publish a public name and description on-chain; the dashboard and the website show them.
+
+```bash
+.venv/bin/c4p profile set --name "Deep Pawn" --description "Stockfish 19, skill 20, plays 300+2"
+.venv/bin/c4p profile show --address 0x...
+```
+
+```python
+client.set_profile("Deep Pawn", "Stockfish 19, skill 20, plays 300+2")
+client.profile("0x...")        # Profile(name, description, label="Deep Pawn·3f2a"), sanitized for display
+```
+
+Names are up to 32 characters of `A–Z a–z 0–9`, space, `-`, `_` and `.`; descriptions are up to 280 bytes of
+UTF-8 on a single line. **Names are not unique**, so every interface shows them with a fragment of the address
+(`Deep Pawn·3f2a`): two bots called "Magnus" are always distinguishable.
+
 `engine` can be a UCI command (`"stockfish"`, `"/path/to/lc0 --threads=4"`), the bundled `"builtin"`, a
 `UciEngine` instance, or any callable `f(board) -> move` (or `f(board, movetime_ms)` to receive the
 clock-aware think budget). Contract refusals arrive as `ContractError` with the contract's own error name
@@ -115,7 +133,8 @@ reply). Comfortable on an L2; expensive on L1 at busy times.
 | Contract | `C4P_CONTRACT` | The SDK refuses to connect unless the code at the address matches the bundled build hash (`C4P_CODEHASH` to override) |
 | Wallet | `~/.chess4profit/wallet.json`, `c4p --wallet` | Password prompted, or `C4P_WALLET_PASSWORD`; `C4P_PRIVATE_KEY` for scripts |
 | Fee cap | `Client(max_fee_gwei=…)` | Never signs above it (default 200 gwei) |
-| Fee recipient | `FEE_RECIPIENT` in `Chess4Profit.sol` | The deploy script refuses the placeholder on a public chain |
+| Fee recipient | `FEE_RECIPIENT` in `Chess4Profit.sol` | Mainnets refuse the placeholder; a testnet needs `C4P_ALLOW_PLACEHOLDER_FEE=true` |
+| Deployment block | `C4P_DEPLOY_BLOCK` | Floor for log scans; set it on any long-lived chain |
 
 ## Repository
 
@@ -143,7 +162,8 @@ forge test                                    # ~5 min: perft, rules, game flow,
   of thousands of random games is cross-checked against python-chess through the real contract.
 - **Adversaries**: `Attacks.t.sol` (slow-play, lobby flooding, orphans, hostile and reentrant receivers,
   forced ETH), `Ordering.t.sol` (every racing pair of transactions in both orders), `GasWorstCase.t.sol`,
-  and `Invariants.t.sol` (stateful fuzzing: money conservation, lobby-index exactness, state consistency).
+  `Profiles.t.sol` (name/description rules, injection and spoofing attempts), and `Invariants.t.sol` (stateful
+  fuzzing: money conservation, lobby-index exactness, state consistency).
 - **Static analysis**: Slither, clean of high and medium findings; runs in CI.
 
 `SECURITY.md` records what four review passes found and fixed, what is verified, and what remains. The code

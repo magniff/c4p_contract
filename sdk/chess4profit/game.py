@@ -41,17 +41,29 @@ class Game:
         return chess.WHITE if i.white.lower() == me else chess.BLACK if i.black.lower() == me else None
 
     def _from_block(self) -> int:
-        if self.start_block is None:  # attached to an existing game: look back for its creation
-            head, step = self.client.w3.eth.block_number, 5000
-            for hi in range(head, -1, -step):
-                lo = max(0, hi - step + 1)
-                flt = {"address": self.client.contract.address, "fromBlock": lo, "toBlock": hi,
-                       "topics": [None, "0x" + hex(self.id)[2:].rjust(64, "0")]}
-                if self.client.w3.eth.get_logs(flt):
-                    self.start_block = lo
+        """Block of this game's GameCreated event, so a replay starts from the very first move.
+
+        Searches for GameCreated specifically: the most recent chunk with *any* event of the game would be
+        too late (a resumed bot would replay a partial history and never line up with the chain).
+        The search never goes below the contract's deployment block.
+        """
+        if self.start_block is None:
+            c = self.client
+            created = next(k for k, v in c._topics.items() if v == "GameCreated")
+            head, floor, step = c.w3.eth.block_number, c.deploy_block, 10_000
+            hi = head
+            while hi >= floor:
+                lo = max(floor, hi - step + 1)
+                flt = {"address": c.contract.address, "fromBlock": lo, "toBlock": hi,
+                       "topics": ["0x" + created, "0x" + hex(self.id)[2:].rjust(64, "0")]}
+                logs = c.w3.eth.get_logs(flt)
+                if logs:
+                    self.start_block = logs[0]["blockNumber"]
                     break
+                hi = lo - 1
             else:
-                self.start_block = 0
+                raise RuntimeError(f"game #{self.id} has no GameCreated event at or after block {floor}"
+                                   " (wrong deploy block / contract address?)")
         return self.start_block
 
     def events(self, from_start: bool = True, poll_interval: float = 0.25) -> ev.EventStream:

@@ -10,3 +10,6 @@ __pycache__/
 # local wallets must never be committed
 *.keystore
 wallet.json
+
+# testnet deployment details (keys, addresses) live here and never leave this machine
+arbitrum/

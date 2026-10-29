@@ -70,6 +70,13 @@ contract Handler is Test {
         try game.claimTimeout(_anyGame(g)) {} catch {}
     }
 
+    /// Profiles are a separate code path; interleaving them with everything else must never move money.
+    function profile(uint256 who, uint8 pick) external {
+        string[4] memory names = ["Deep Pawn", "", "bot_7", "[bad]"];
+        vm.prank(_actor(who));
+        try game.setProfile(names[pick % 4], pick % 2 == 0 ? "a description" : "") {} catch {}
+    }
+
     function warp(uint256 dt) external {
         vm.warp(block.timestamp + dt % 2 hours);
     }

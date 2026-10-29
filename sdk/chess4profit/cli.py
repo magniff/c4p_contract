@@ -10,13 +10,13 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .client import Client
+from .client import Client, ContractError
 from .wallet import DEFAULT_PATH, Wallet
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="c4p", description="Wagered chess for bots, settled on Ethereum.")
-    ap.add_argument("--network", default="local", help="local | base-sepolia | base (default: local)")
+    ap.add_argument("--network", default="local", help="local | base-sepolia | base | arbitrum-sepolia | arbitrum (default: local)")
     ap.add_argument("--rpc")
     ap.add_argument("--contract")
     ap.add_argument("--wallet", default=str(DEFAULT_PATH), help="wallet file (default %(default)s)")
@@ -37,6 +37,11 @@ def main(argv=None) -> int:
     p.add_argument("--colour", choices=["white", "black", "random"], default="random")
     p.add_argument("--movetime", type=float, default=0.3, help="engine think time, seconds")
     p.add_argument("--join", type=int, metavar="GAME_ID", help="join this specific game instead of matchmaking")
+    pr = sub.add_parser("profile", help="your bot's public on-chain name and description")
+    pr.add_argument("action", choices=["set", "show"])
+    pr.add_argument("--name", help="<=32 chars of A-Z a-z 0-9 space - _ .")
+    pr.add_argument("--description", default="", help="<=280 bytes, single line")
+    pr.add_argument("--address", help="show: whose profile (default: your wallet)")
     m = sub.add_parser("monitor", help="terminal dashboard of your agents' games (pip install chess4profit[tui])")
     m.add_argument("--watch", action="append", default=[], metavar="ADDR[=NAME]", help="agent address to follow (repeatable)")
     m.add_argument("--all", action="store_true", help="show every game, not just your agents'")
@@ -55,12 +60,12 @@ def main(argv=None) -> int:
         agents = {}
         for w in a.watch:
             addr, _, name = w.partition("=")
-            agents[addr] = name or addr[:8]
+            agents[addr] = name or None  # no local label: show the on-chain profile name
         if not agents and Wallet.exists(a.wallet):
             ws = Wallet.load(a.wallet)
-            agents[ws.address] = "me"
+            agents[ws.address] = None
         head = client.w3.eth.block_number
-        Dashboard(Monitor(client, agents, from_block=0 if head < 50_000 else head - 50_000), show_all=a.all).run()
+        Dashboard(Monitor(client, agents, from_block=max(client.deploy_block, head - 50_000)), show_all=a.all).run()
         return 0
 
     wallet = Wallet.load(a.wallet)
@@ -70,6 +75,16 @@ def main(argv=None) -> int:
         if a.fund:
             client.dev_fund(a.fund)
         print(f"{wallet.address}\nbalance: {client.balance()} ETH   pending withdrawal: {client.pending()} ETH")
+    elif a.cmd == "profile":
+        if a.action == "set":
+            if a.name is None:
+                ap.error("profile set needs --name (use --name '' --description '' to remove)")
+            try:
+                client.set_profile(a.name, a.description)
+            except ContractError as e:
+                ap.error(f"rejected by the contract: {e.name} (see --help for the allowed characters)")
+        p = client.profile(a.address)
+        print(f"{p.address}\nname:        {p.name or '(none)'}\ndescription: {p.description or '(none)'}")
     elif a.cmd == "games":
         for g in client.open_games(a.stake, a.base_time, a.increment):
             print(f"#{g.id}  stake {g.stake_eth} ETH  clock {g.base_time}s+{g.increment}  by {g.white}")

@@ -70,14 +70,20 @@ class AgentStats:
 
 
 class Monitor:
-    def __init__(self, client: Client, agents: Optional[Dict[str, str]] = None, from_block: int = 0,
+    PROFILE_TTL = 30.0  # seconds before a cached on-chain profile is re-read
+
+    def __init__(self, client: Client, agents: Optional[Dict[str, Optional[str]]] = None, from_block: int = 0,
                  on_event: Optional[Callable[[ev.Event, GameState], None]] = None):
+        """`agents` maps address -> local label. A label of None means: use the bot's on-chain profile name."""
         self.client = client
         self.on_event = on_event
         self.agents: Dict[str, AgentStats] = {}
+        self._labels: Dict[str, Optional[str]] = {}
+        self._profiles: Dict[str, tuple] = {}  # addr -> (fetched_at, Profile)
         for addr, name in (agents or {}).items():
             a = client.w3.to_checksum_address(addr)
-            self.agents[a.lower()] = AgentStats(a, name, balance=client.w3.eth.get_balance(a))
+            self._labels[a.lower()] = name
+            self.agents[a.lower()] = AgentStats(a, name or "", balance=client.w3.eth.get_balance(a))
             self.agents[a.lower()].start_balance = self.agents[a.lower()].balance
         self.games: Dict[int, GameState] = {}
         self.fee_recipient = client.contract.functions.FEE_RECIPIENT().call()
@@ -88,9 +94,31 @@ class Monitor:
         self._stream = client.events(None, from_block=from_block)
         self._seen_tx: set = set()
 
+    def profile(self, addr: str):
+        """On-chain profile, cached for PROFILE_TTL seconds. None if it can't be read."""
+        key = addr.lower()
+        hit = self._profiles.get(key)
+        if hit is None or time.time() - hit[0] > self.PROFILE_TTL:
+            try:
+                self._profiles[key] = (time.time(), self.client.profile(addr))
+            except Exception:  # noqa: BLE001  - a display nicety must never break the dashboard
+                return hit[1] if hit else None
+        return self._profiles[key][1]
+
     def name(self, addr: str) -> str:
-        a = self.agents.get(addr.lower())
-        return a.name if a else (addr[:6] + "…" + addr[-4:] if addr else "—")
+        """Display label. A local label wins; otherwise the on-chain name plus an address fragment
+        (names are not unique, so a bare name could be an impersonator)."""
+        if not addr:
+            return "—"
+        label = self._labels.get(addr.lower())
+        if label:
+            return label
+        p = self.profile(addr)
+        return p.label if p else addr[:6] + "…" + addr[-4:]
+
+    def description(self, addr: str) -> str:
+        p = self.profile(addr) if addr else None
+        return p.description if p else ""
 
     def mine(self, g: GameState) -> bool:
         return any(p.lower() in self.agents for p in (g.creator, g.white, g.black) if p)

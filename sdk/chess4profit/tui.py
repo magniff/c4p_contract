@@ -6,6 +6,7 @@ from collections import deque
 from typing import Deque, Optional
 
 import chess
+from rich.markup import escape
 from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -141,9 +142,9 @@ class Dashboard(App):
     def _draw_agents(self) -> None:
         t = self.query_one("#agents", DataTable)
         t.clear()
-        for a in sorted(self.mon.agents.values(), key=lambda x: x.name):
+        for a in sorted(self.mon.agents.values(), key=lambda x: self.mon.name(x.address).lower()):
             t.add_row(
-                Text(a.name, style="bold cyan"), eth(a.balance), signed_eth(a.delta),
+                Text(self.mon.name(a.address), style="bold cyan"), eth(a.balance), signed_eth(a.delta),
                 Text(eth(a.gas_wei, 6), style="magenta"), f"{a.gas_used:,}", str(a.tx_count),
                 Text.assemble((str(a.wins), "green"), "/", (str(a.draws), "yellow"), "/", (str(a.losses), "red")),
                 eth(a.locked) if a.locked else "—", signed_eth(a.pnl_games),
@@ -196,8 +197,14 @@ class Dashboard(App):
         g = self.mon.games.get(self.selected) if self.selected is not None else None
         title = Text("select a game", style="dim")
         if g:
+            # Text objects, never markup strings: on-chain text is displayed, not interpreted
             title = Text.assemble((f"Game #{g.id}  ", "bold"), (f"{eth(g.stake, 3)} ETH each  ", "yellow"),
-                                  (f"{self.mon.name(g.white)}", "bold"), " vs ", (f"{self.mon.name(g.black)}", "bold"))
+                                  (self.mon.name(g.white), "bold"), " vs ", (self.mon.name(g.black), "bold"))
+            for side, addr in (("♔", g.white), ("♚", g.black)):
+                d = self.mon.description(addr)
+                if d:
+                    title.append(f"\n{side} ", style="dim")
+                    title.append(d[:90] + ("…" if len(d) > 90 else ""), style="italic dim")
         self.query_one("#title", Static).update(title)
         self.query_one("#board", Static).update(render_board(g, self.flip))
         mv = Text()
@@ -216,7 +223,8 @@ class Dashboard(App):
         while self._events:
             e = self._events.popleft()
             g = self.mon.games.get(e.game_id)
-            n = self.mon.name
+            # the log takes markup strings, so every externally sourced name is escaped first
+            n = lambda addr: escape(self.mon.name(addr))  # noqa: E731
             if isinstance(e, ev.GameCreated):
                 msg = f"[yellow]#{e.game_id}[/] {n(e.creator)} opens a table for {eth(e.stake, 3)} ETH"
             elif isinstance(e, ev.GameStarted):

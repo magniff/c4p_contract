@@ -543,3 +543,64 @@ def test_urgent_transaction_bids_a_higher_tip_and_respects_the_fee_cap():
     a.max_fee_gwei = (normal["maxFeePerGas"] + normal["maxPriorityFeePerGas"]) / 1e9  # below the bumped fee
     with pytest.raises(GasPriceTooHigh):
         a.transact(a.contract.functions.createGame(300, 2, True), value=to_wei("0.01"), urgent=True)
+
+
+def test_resume_finds_creation_even_when_history_spans_many_chunks(make_client):
+    """Regression: attaching to a game whose history spans more than one log-scan chunk must replay from
+    GameCreated, not from the most recent chunk that happens to contain one of its events."""
+    a, b = make_client(), make_client()
+    ga = a.create_game("0.01", colour="white")
+    gb = b.join_game(ga.id)
+    ga.move("e4")
+    a.w3.provider.make_request("anvil_mine", [hex(25_000)])   # push later events into a different chunk
+    gb.move("e5")
+    fresh = Client.connect("local", wallet=a.wallet)
+    g = fresh.game(ga.id)
+    assert g._from_block() == ga.start_block
+    assert [m.uci() for m in g.board().move_stack] == ["e2e4", "e7e5"]
+    ga.resign()
+
+
+# ---------------------------------------------------------------- bot profiles
+
+def test_profile_roundtrip_and_label(make_client):
+    a, b = make_client(), make_client()
+    a.set_profile("Deep Pawn", "Stockfish 19, skill 20")
+    p = b.profile(a.address)                      # anyone can read it
+    assert (p.name, p.description) == ("Deep Pawn", "Stockfish 19, skill 20")
+    assert p.label.startswith("Deep Pawn·") and p.label.endswith(a.address[2:6].lower())
+    assert b.profile().name == "" and b.profile().label.startswith(b.address[:6])
+    a.set_profile("", "")
+    assert a.profile().name == ""
+
+
+def test_profile_contract_rejects_markup_names(make_client):
+    a = make_client()
+    before = a.balance()
+    for bad in ["[bold]x", "<b>x</b>", "Magnus ", "a\x1b[2Jb"]:
+        with pytest.raises(ContractError) as e:
+            a.set_profile(bad)
+        assert e.value.name == "BadName"
+    assert a.balance() == before, "rejected at estimation: no gas spent"
+
+
+def test_profile_sanitizes_invisible_unicode_from_chain(make_client):
+    """Valid UTF-8 the contract can't cheaply police: right-to-left override, zero-width space, BOM."""
+    from chess4profit import safe_text
+    a, b = make_client(), make_client()
+    sneaky = "Trusted‮ bot​ with﻿ tricks"
+    a.set_profile("x", sneaky)                    # accepted on-chain (no control bytes)...
+    shown = b.profile(a.address).description      # ...but never displayed raw
+    assert shown == "Trusted bot with tricks"
+    assert safe_text("a‮b  c‍d") == "ab cd"
+
+
+def test_monitor_names_come_from_chain_with_address_fragment(make_client):
+    from chess4profit.monitor import Monitor
+    a, b = make_client(), make_client()
+    a.set_profile("Alpha", "first bot")
+    watcher = Client.connect("local")
+    mon = Monitor(watcher, {a.address: None, b.address: "local-label"})
+    assert mon.name(a.address) == "Alpha·" + a.address[2:6].lower()   # on-chain, disambiguated
+    assert mon.name(b.address) == "local-label"                       # a local label wins
+    assert mon.description(a.address) == "first bot"

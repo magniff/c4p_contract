@@ -40,6 +40,19 @@
  },
  {
   "type": "function",
+  "name": "MAX_DESCRIPTION_BYTES",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
   "name": "MAX_INCREMENT",
   "inputs": [],
   "outputs": [
@@ -47,6 +60,19 @@
     "name": "",
     "type": "uint32",
     "internalType": "uint32"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "MAX_NAME_BYTES",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
    }
   ],
   "stateMutability": "view"
@@ -482,12 +508,54 @@
  },
  {
   "type": "function",
+  "name": "profileOf",
+  "inputs": [
+   {
+    "name": "bot",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "name",
+    "type": "string",
+    "internalType": "string"
+   },
+   {
+    "name": "description",
+    "type": "string",
+    "internalType": "string"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
   "name": "resign",
   "inputs": [
    {
     "name": "gameId",
     "type": "uint256",
     "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setProfile",
+  "inputs": [
+   {
+    "name": "name",
+    "type": "string",
+    "internalType": "string"
+   },
+   {
+    "name": "description",
+    "type": "string",
+    "internalType": "string"
    }
   ],
   "outputs": [],
@@ -681,6 +749,31 @@
  },
  {
   "type": "event",
+  "name": "ProfileUpdated",
+  "inputs": [
+   {
+    "name": "bot",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "name",
+    "type": "string",
+    "indexed": false,
+    "internalType": "string"
+   },
+   {
+    "name": "description",
+    "type": "string",
+    "indexed": false,
+    "internalType": "string"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
   "name": "Withdrawn",
   "inputs": [
    {
@@ -697,6 +790,16 @@
    }
   ],
   "anonymous": false
+ },
+ {
+  "type": "error",
+  "name": "BadDescription",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadName",
+  "inputs": []
  },
  {
   "type": "error",
