@@ -1,71 +1,154 @@
 # Chess4Profit
 
-Wagered chess between AI agents, fully on-chain. The contract validates every move (all FIDE rules),
-detects the result, and pays the winner the pot minus a fee.
+Wagered chess for bots, settled on Ethereum.
 
-## Quickstart (SDK)
-    python3 -m venv .venv && .venv/bin/pip install -e "sdk[test]"
-    .venv/bin/python scripts/devchain.py        # terminal 1: local chain + deployed contract
+Two agents lock an equal stake, play a game move by move through a smart contract, and the winner takes the
+pot. The contract enforces every rule of chess itself — castling, en passant, promotion, pins, checkmate,
+stalemate, the 50-move rule, threefold repetition — so there is nothing to trust and nobody to appeal to.
+The engine on your side can be Stockfish, Leela, or anything else that speaks UCI; it never learns that it is
+playing on a blockchain.
 
-    .venv/bin/c4p wallet new                    # terminal 2 (and 3, with --wallet other.json)
-    .venv/bin/c4p wallet show --fund 10         # local only: free test ETH
-    .venv/bin/c4p play --engine stockfish --stake 0.01     # or --engine builtin
+```
+┌──────────────┐   UCI    ┌────────────────┐   JSON-RPC   ┌──────────────────┐
+│  your engine │ ◄──────► │  chess4profit  │ ◄──────────► │  Chess4Profit.sol│
+│  (stockfish) │          │  (python sdk)  │              │  (the referee)   │
+└──────────────┘          └────────────────┘              └──────────────────┘
+```
 
-Same in Python:
+## Quickstart
 
-    from chess4profit import Client, Wallet
-    client = Client.connect("local", wallet=Wallet.load_or_create())
-    client.play("stockfish", stake="0.01")      # joins an open 0.01 ETH game or opens one; plays to the end
+Requirements: [Foundry](https://getfoundry.sh) (`forge`, `anvil`), Python 3.9+, and optionally a UCI engine
+(`brew install stockfish`). A toy engine is bundled, so nothing else is needed to try it.
 
-    game = client.create_game("0.01", colour="white")         # or client.join_game(7)
-    for e in game.events():                                   # typed event stream: GameStarted, MoveMade, GameFinished...
-        ...
-    game.move("e4"); game.resign(); game.board(); game.info()
+```bash
+git clone --recurse-submodules git@github.com:magniff/c4p_contract.git && cd c4p_contract
+python3 -m venv .venv && .venv/bin/pip install -e "sdk[test,tui]"
 
-`engine` is a UCI command (`"stockfish"`, `"/path/to/lc0 --threads=4"`), `"builtin"`, a `UciEngine`, or any
-`f(board) -> chess.Move` (or `f(board, movetime_ms)`). Bots sit at a **table** = (stake, base_time, increment)
-and only ever join games with exactly those terms; the defaults are 300s + 2s/move. The engine never sees Ethereum. Contract errors surface as `ContractError(.name)`
-(`IllegalMove`, `NotYourTurn`, ...). Wallets are encrypted keystores in `~/.chess4profit/wallet.json`
-(password via prompt or `C4P_WALLET_PASSWORD`). Networks: `local`, `base-sepolia`, `base` (set
-`C4P_CONTRACT` once deployed; `C4P_RPC` overrides the endpoint).
+.venv/bin/python scripts/devchain.py           # terminal 1: local chain with the contract deployed
+```
 
-## Dashboard (TUI)
-    brew install stockfish                      # or any UCI engine
-    .venv/bin/pip install -e "sdk[tui]"
-    .venv/bin/python scripts/tui_demo.py        # chain + six Stockfish agents at three stake tables + dashboard
+```bash
+# terminal 2 — a bot
+.venv/bin/c4p wallet new                       # encrypted keystore in ~/.chess4profit/wallet.json
+.venv/bin/c4p wallet show --fund 10            # local chain only: free test ETH
+.venv/bin/c4p play --engine stockfish --stake 0.01
 
-Against your own agents: `c4p monitor --watch 0xAgent1=alice --watch 0xAgent2=bob` (defaults to your wallet).
-Shows per-agent balance, change, gas paid (ETH and units), tx count, W/D/L, stake in play and net from games;
-every game with stake, status, ply count, last move, move clock and result; a board + move list for the selected
-game; a live event log; and header totals (fees collected, ETH held by the contract).
-Keys: `q` quit, `a` all/mine games, `f` hide finished, `v` flip board, arrows select a game.
-Single agent process: `C4P_PRIVATE_KEY=0x... python scripts/run_bot.py --stake 0.1 --skill 10`.
+# terminal 3 — its opponent (a second wallet)
+.venv/bin/c4p --wallet ~/.chess4profit/bob.json wallet new
+.venv/bin/c4p --wallet ~/.chess4profit/bob.json wallet show --fund 10
+.venv/bin/c4p --wallet ~/.chess4profit/bob.json play --engine builtin --stake 0.01
+```
 
-## Layout
-- `src/ChessEngine.sol`  - rules library (move validation, mate/stalemate/draw detection)
-- `src/Chess4Profit.sol` - lobby, clocks, payouts, fee
-- `sdk/chess4profit/`    - Python SDK (wallet, client, event stream, game loop, UCI bridge, `c4p` CLI)
-- `sdk/chess4profit/monitor.py`, `tui.py` - dashboard data layer and Textual UI
-- `scripts/`             - `devchain.py`, `demo.py`, `tui_demo.py`, `run_bot.py`, `fuzz_vs_pythonchess.py`, `export_abi.py`
-- `test/`                - perft, rules, game flow, attacks, ordering, gas worst-cases (`forge test`, ~5 min); `sdk/tests` (`pytest sdk/tests`, ~2 min)
+The two bots find each other at the 0.01 ETH table, play to the end, and the pot is paid out automatically.
 
-After changing the contract: `forge build && python scripts/export_abi.py`.
+### The same thing in Python
 
-## Game flow
-`createGame(baseTime, increment, creatorPlaysWhite)` + stake (Fischer clock: total time + increment per move, bank capped at 1 day; open games expire after 1h; lobby indexed per table via `lobbyKey(stake, baseTime, increment)`) -> `joinGame(id)` + equal stake -> `makeMove(id, move)`...
-Endings: checkmate, stalemate, insufficient material (K/K+minor), 50-move, threefold repetition (all automatic),
-`resign`, `claimTimeout`. Unjoined games: `cancelGame` (anyone can refund an expired one). Move = `from | to<<6 | promo<<12`, a1=0..h8=63.
-Events: GameCreated, GameStarted, MoveMade, GameFinished.
+```python
+from chess4profit import Client, Wallet
 
-## Security
-See `SECURITY.md`: three adversarial passes (attacks, transaction ordering, spam economics), what each found and
-fixed, Slither results, residual risks. Suites: `test/Attacks.t.sol`, `test/Ordering.t.sol`, `test/Adversarial.t.sol`,
-`test/GasWorstCase.t.sol`, `test/Invariants.t.sol` (stateful fuzzing), plus `sdk/tests` (runs against a real local chain, including a simulated reorg).
+client = Client.connect("local", wallet=Wallet.load_or_create())
+result = client.play("stockfish", stake="0.01")      # join an open table or open one; play to the end
+print(result.result, result.reason)                  # e.g. WHITE_WINS CHECKMATE
+```
 
-## CI
-`.github/workflows/ci.yml` runs the contract suite, the SDK suite on a real anvil, and Slither on every push.
+Or step by step:
 
-## Before mainnet
-- Set `FEE_RECIPIENT` in `Chess4Profit.sol` (deploy script refuses the placeholder off-localnet). Fee: `FEE_BPS` = 2.5% of pot, also on draws.
-- Gas: ~200k per ordinary move, ~1.8M for the move that ends a game (proves no legal reply). Fine on an L2, costly on L1.
-- Get an independent audit; this is unaudited.
+```python
+game = client.create_game("0.01", colour="white")    # or client.join_game(7)
+
+for event in game.events():                          # GameStarted, MoveMade, GameFinished, ...
+    ...
+
+game.move("e4")                                      # SAN, UCI ("e2e4") or a chess.Move
+game.board()                                         # a python-chess Board rebuilt from chain history
+game.info()                                          # status, players, clocks, result
+game.resign()
+```
+
+`engine` can be a UCI command (`"stockfish"`, `"/path/to/lc0 --threads=4"`), the bundled `"builtin"`, a
+`UciEngine` instance, or any callable `f(board) -> move` (or `f(board, movetime_ms)` to receive the
+clock-aware think budget). Contract refusals arrive as `ContractError` with the contract's own error name
+(`IllegalMove`, `NotYourTurn`, `Expired`, ...).
+
+## Dashboard
+
+```bash
+.venv/bin/python scripts/tui_demo.py          # six Stockfish agents at three tables, live
+.venv/bin/c4p monitor --watch 0xAgent1=alice --watch 0xAgent2=bob   # or follow your own bots
+```
+
+![dashboard](docs/dashboard.svg)
+
+Per agent: balance, change since start, gas paid, transaction count, win/draw/loss, stake in play and net
+from games. Per game: stake, status, ply count, last move, a live clock and the result. A board and move
+list for the selected game, a live event log, and the totals (fees collected, ETH held by the contract).
+
+Keys: `q` quit · `a` all games / mine · `f` hide finished · `v` flip board · arrows select a game.
+
+## How a game works
+
+| Step | Call | What happens |
+|---|---|---|
+| Open a table | `createGame(baseTime, increment, playWhite)` + stake | You choose the stake, the clock and your colour. The table is listed for one hour. |
+| Sit down | `joinGame(id)` + equal stake | Colours are fixed, clocks start. |
+| Play | `makeMove(id, move)` | Fully validated. The contract detects checkmate, stalemate, insufficient material, the 50-move rule and threefold repetition, and settles immediately. |
+| Other endings | `resign(id)`, `claimTimeout(id)` | Anyone may flag a player whose clock ran out. |
+| Walk away | `cancelGame(id)` | Refund of an unjoined table. Anyone may refund an expired one. |
+
+- **Clock**: Fischer — each side has a time bank plus an increment per move, capped at one day, so an
+  opponent can neither stretch the game by playing slowly nor hoard time to stall.
+- **Tables**: a bot only ever joins games with exactly the stake *and* clock it would create itself
+  (default 300 s + 2 s/move). Spam at other terms is invisible to it.
+- **Payout**: pot minus a 2.5% fee, pushed to the winner (split on a draw). A wallet that cannot receive ETH
+  is credited and can `withdraw()` later; a game can always finish.
+- **Moves** on the wire are `from | to << 6 | promotion << 12` with `a1 = 0 … h8 = 63`, the same numbering as
+  python-chess. Events: `GameCreated`, `GameStarted`, `MoveMade`, `GameFinished`, `GameCancelled`.
+
+Gas: roughly 200k per ordinary move and 1.8M for the move that ends a game (it has to prove there is no legal
+reply). Comfortable on an L2; expensive on L1 at busy times.
+
+## Configuration
+
+| Setting | Where | Notes |
+|---|---|---|
+| Network | `Client.connect("local" \| "base-sepolia" \| "base")`, `c4p --network` | `C4P_RPC` overrides the endpoint |
+| Contract | `C4P_CONTRACT` | The SDK refuses to connect unless the code at the address matches the bundled build hash (`C4P_CODEHASH` to override) |
+| Wallet | `~/.chess4profit/wallet.json`, `c4p --wallet` | Password prompted, or `C4P_WALLET_PASSWORD`; `C4P_PRIVATE_KEY` for scripts |
+| Fee cap | `Client(max_fee_gwei=…)` | Never signs above it (default 200 gwei) |
+| Fee recipient | `FEE_RECIPIENT` in `Chess4Profit.sol` | The deploy script refuses the placeholder on a public chain |
+
+## Repository
+
+```
+src/ChessEngine.sol       rules: move validation, mate / stalemate / draw detection
+src/Chess4Profit.sol      lobby, clocks, settlement, fee
+sdk/chess4profit/         Python SDK, `c4p` CLI, dashboard (monitor.py, tui.py)
+scripts/                  devchain.py · demo.py · tui_demo.py · run_bot.py · fuzz_vs_pythonchess.py · export_abi.py
+test/                     Foundry suites (see below)
+sdk/tests/                SDK suite, runs against a real local chain
+```
+
+After changing the contract, run `forge build && python scripts/export_abi.py` so the SDK's bundled ABI and
+code hash follow it (`scripts/devchain.py` does this for you).
+
+## Verification
+
+```bash
+forge test                                    # ~5 min: perft, rules, game flow, attacks, ordering, invariants
+.venv/bin/python -m pytest sdk/tests          # ~2 min: SDK against anvil, including a simulated reorg
+.venv/bin/python scripts/fuzz_vs_pythonchess.py --games 20   # differential fuzz vs python-chess, live
+```
+
+- **Rules**: move generation matches the reference perft counts on six standard positions; every position
+  of thousands of random games is cross-checked against python-chess through the real contract.
+- **Adversaries**: `Attacks.t.sol` (slow-play, lobby flooding, orphans, hostile and reentrant receivers,
+  forced ETH), `Ordering.t.sol` (every racing pair of transactions in both orders), `GasWorstCase.t.sol`,
+  and `Invariants.t.sol` (stateful fuzzing: money conservation, lobby-index exactness, state consistency).
+- **Static analysis**: Slither, clean of high and medium findings; runs in CI.
+
+`SECURITY.md` records what four review passes found and fixed, what is verified, and what remains. The code
+is unaudited.
+
+## License
+
+MIT.
